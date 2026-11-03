@@ -5,3 +5,7 @@ __pycache__/
 .env
 .streamlit/secrets.toml
 .DS_Store
+
+# Streamlit agent skills (local only)
+.agents/
+.claude/
