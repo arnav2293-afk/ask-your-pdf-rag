@@ -1,0 +1,8 @@
+streamlit
+pypdf
+faiss-cpu
+rank-bm25
+sentence-transformers
+google-genai
+numpy
+pandas
