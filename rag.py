@@ -9,7 +9,7 @@ from pypdf import PdfReader
 from rank_bm25 import BM25Okapi
 
 EMBED_MODEL = "all-MiniLM-L6-v2"   # free, runs locally, 384-dim vectors
-LLM_MODEL = "gemini-2.5-flash"      # change here if Google renames the model
+LLM_MODEL = "gemini-3.8-flash"      # change here if Google renames the model
 CHUNK_SIZE = 900                    # characters per chunk
 CHUNK_OVERLAP = 150                 # characters shared between neighbor chunks
 
