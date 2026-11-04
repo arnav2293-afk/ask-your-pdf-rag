@@ -7,6 +7,7 @@ import re
 
 import streamlit as st
 from google import genai
+from google.genai import types
 from sentence_transformers import SentenceTransformer
 
 from rag import EMBED_MODEL, PDFIndex, check_citations, stream_answer, suggest_questions
@@ -88,6 +89,8 @@ def friendly_error(e):
     t = str(e)
     if "429" in t or "RESOURCE_EXHAUSTED" in t:
         return "Gemini's free limit was reached. Wait about a minute, then ask again."
+    if "503" in t or "UNAVAILABLE" in t:
+        return "Gemini is very busy right now and did not answer after several tries. Wait a minute, then ask again."
     if "API key" in t or "401" in t or "403" in t:
         return "Gemini rejected the API key. Check GEMINI_API_KEY in your secrets."
     return f"Gemini could not answer this time: {t}"
@@ -110,7 +113,7 @@ api_key = get_api_key()
 if not api_key:
     st.error("Missing GEMINI_API_KEY. Add it to .streamlit/secrets.toml (see README).")
     st.stop()
-client = genai.Client(api_key=api_key)
+client = genai.Client(api_key=api_key, http_options=types.HttpOptions(timeout=60000))  # give up after 60 s
 
 ss = st.session_state
 ss.setdefault("messages", [])
@@ -138,10 +141,7 @@ if files:
             idx.build([(f.name, io.BytesIO(f.getvalue())) for f in files],
                       progress=lambda p, msg: bar.progress(p, text=msg))
             ss.index = idx
-            try:
-                ss.suggestions = suggest_questions(client, idx)
-            except Exception:
-                ss.suggestions = []
+            ss.need_suggestions = True
         except ValueError as e:
             ss.index_error = str(e)
         bar.empty()
@@ -180,6 +180,12 @@ else:
     st.markdown(f'<p class="docline">Reading {html.escape(names)}: {pages} pages, '
                 f'{len(idx.chunks)} passages.</p>', unsafe_allow_html=True)
 
+    if ss.pop("need_suggestions", False):
+        with st.spinner("Thinking of questions you could ask..."):
+            try:
+                ss.suggestions = suggest_questions(client, idx)
+            except Exception:
+                ss.suggestions = []
     if not ss.messages and ss.suggestions:
         st.markdown("**Try asking**")
         for i, q in enumerate(ss.suggestions):

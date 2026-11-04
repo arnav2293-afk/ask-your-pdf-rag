@@ -1,5 +1,6 @@
 """Core RAG pipeline for Ask Your PDF: parse, chunk, index, retrieve, answer."""
 import re
+import time
 from dataclasses import dataclass
 
 import faiss
@@ -10,6 +11,8 @@ from rank_bm25 import BM25Okapi
 
 EMBED_MODEL = "all-MiniLM-L6-v2"   # free, runs locally, 384-dim vectors
 LLM_MODEL = "gemini-3.8-flash"      # change here if Google renames the model
+FALLBACK_MODELS = ["gemini-flash-latest", "gemini-flash-lite-latest"]  # tried if the main one is busy
+BUSY_ERRORS = ("429", "500", "503", "RESOURCE_EXHAUSTED", "UNAVAILABLE", "INTERNAL")
 CHUNK_SIZE = 900                    # characters per chunk
 CHUNK_OVERLAP = 150                 # characters shared between neighbor chunks
 
@@ -143,16 +146,37 @@ def check_citations(text, n_sources):
     return valid, invalid, grounded
 
 
+def _models():
+    return [LLM_MODEL] + [m for m in FALLBACK_MODELS if m != LLM_MODEL]
+
+
+def _with_retry(call):
+    """Run call(model_name). If Gemini is busy, wait and retry (1s, 2s, 4s),
+    then move to the next model. Other errors are raised straight away."""
+    last_error = None
+    for model in _models():
+        for attempt in range(3):
+            try:
+                return call(model)
+            except Exception as e:
+                last_error = e
+                msg = str(e)
+                if "404" in msg or "NOT_FOUND" in msg:
+                    break                      # model not available to us, try the next one
+                if any(code in msg for code in BUSY_ERRORS):
+                    time.sleep(2 ** attempt)   # back off before retrying
+                    continue
+                raise                          # e.g. bad API key: no point retrying
+    raise last_error
+
+
 def _config(temperature=0.2):
     return types.GenerateContentConfig(system_instruction=SYSTEM_RULES, temperature=temperature)
 
 
 def answer(client, question, chunks, history=None):
-    resp = client.models.generate_content(
-        model=LLM_MODEL,
-        contents=build_prompt(question, chunks, history),
-        config=_config(),
-    )
+    resp = _with_retry(lambda m: client.models.generate_content(
+        model=m, contents=build_prompt(question, chunks, history), config=_config()))
     text = (resp.text or "").strip()
     valid, invalid, grounded = check_citations(text, len(chunks))
     return {"answer": text, "cited": valid, "invalid": invalid, "grounded": grounded}
@@ -160,11 +184,15 @@ def answer(client, question, chunks, history=None):
 
 def stream_answer(client, question, chunks, history=None):
     """Yield the answer piece by piece so the user sees it being written."""
-    for part in client.models.generate_content_stream(
-        model=LLM_MODEL,
-        contents=build_prompt(question, chunks, history),
-        config=_config(),
-    ):
+    def start(model):
+        it = iter(client.models.generate_content_stream(
+            model=model, contents=build_prompt(question, chunks, history), config=_config()))
+        return next(it, None), it              # busy errors show up on the first piece
+
+    first, rest = _with_retry(start)
+    if first is not None and first.text:
+        yield first.text
+    for part in rest:
         if part.text:
             yield part.text
 
@@ -175,9 +203,7 @@ def suggest_questions(client, index, n=3):
     prompt = (f"Here is the start of a document:\n\n{sample}\n\n"
               f"Write {n} short questions (under 12 words each) that this text clearly answers. "
               "One per line, no numbering, no extra text.")
-    resp = client.models.generate_content(
-        model=LLM_MODEL, contents=prompt,
-        config=types.GenerateContentConfig(temperature=0.4),
-    )
+    resp = _with_retry(lambda m: client.models.generate_content(
+        model=m, contents=prompt, config=types.GenerateContentConfig(temperature=0.4)))
     lines = [re.sub(r"^[\s\-\*\d\.\)]+", "", line).strip() for line in (resp.text or "").splitlines()]
     return [line for line in lines if line.endswith("?")][:n]
