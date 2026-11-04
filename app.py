@@ -19,18 +19,72 @@ st.set_page_config(page_title="Ask Your PDF", page_icon="📄", layout="centered
 # and page references marked like a highlighter on a printed page.
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=Literata:opsz,wght@7..72,400;7..72,600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=Literata:opsz,wght@7..72,400;7..72,600;7..72,700&display=swap');
+
+:root {
+  --gold: #F2D78A;        /* page background */
+  --gold-deep: #E9B949;   /* highlighter, card edges */
+  --paper: #FFFBF0;       /* answer cards, inputs */
+  --coffee: #4A2C1D;      /* text, buttons, sidebar */
+  --mocha: #7A5236;       /* secondary text */
+  --latte: #E6CF9C;       /* thin borders */
+  --foam: #F7E7BF;        /* text on coffee */
+}
+
 html, body, .stMarkdown, button, input, textarea { font-family: 'IBM Plex Sans', system-ui, sans-serif; }
-h1 { font-family: 'Literata', Georgia, serif !important; font-weight: 600 !important; letter-spacing: -0.01em; }
+
+/* whole page: soft gold instead of white */
+.stApp, [data-testid="stHeader"], [data-testid="stBottom"], [data-testid="stBottom"] > div,
+[data-testid="stBottomBlockContainer"] { background: var(--gold) !important; }
+.stApp { color: var(--coffee); }
+
+/* title area */
+h1 { font-family: 'Literata', Georgia, serif !important; font-weight: 700 !important; color: var(--coffee) !important;
+     font-size: 3.2rem !important; letter-spacing: -0.015em; line-height: 1.1 !important; }
+.tagline { color: var(--mocha); margin-top: -0.4rem; font-size: 1.12rem; }
+.docline { color: var(--mocha); font-size: .92rem; margin: .2rem 0 1rem; }
+[data-testid="stCaptionContainer"], [data-testid="stCaptionContainer"] * { color: var(--mocha) !important; }
+
+/* sidebar: coffee panel */
+[data-testid="stSidebar"] { background: var(--coffee) !important; }
+[data-testid="stSidebar"] * { color: var(--foam) !important; }
+
+/* chat: answers on paper cards, questions straight on the gold */
+[data-testid="stChatMessage"] { background: var(--paper); border: 1px solid var(--latte); border-radius: 14px;
+                                padding: 1rem 1.2rem; box-shadow: 0 3px 0 var(--gold-deep); }
+[data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"]) { background: transparent; border: none; box-shadow: none; }
 [data-testid="stChatMessage"] .stMarkdown p,
-[data-testid="stChatMessage"] .stMarkdown li { font-family: 'Literata', Georgia, serif; font-size: 1.02rem; line-height: 1.7; }
-.cite { font-family: 'IBM Plex Sans', sans-serif; font-size: .78em; font-weight: 600; color: #1F2A44;
-        background: linear-gradient(transparent 45%, #FFE066 45%); padding: 0 .25em; margin-left: .15em;
+[data-testid="stChatMessage"] .stMarkdown li { font-family: 'Literata', Georgia, serif; font-size: 1.04rem; line-height: 1.7; color: var(--coffee); }
+
+/* page marks: coffee text on a gold highlighter stroke */
+.cite { font-family: 'IBM Plex Sans', sans-serif; font-size: .78em; font-weight: 600; color: var(--coffee);
+        background: linear-gradient(transparent 40%, var(--gold-deep) 40%); padding: 0 .25em; margin-left: .15em;
         white-space: nowrap; cursor: help; }
-.tagline { color: #5B6478; margin-top: -0.6rem; font-size: 1.05rem; }
-.docline { color: #5B6478; font-size: .92rem; margin: .2rem 0 1rem; }
-.step { display: flex; gap: .9rem; align-items: baseline; margin: .5rem 0; }
-.step b { color: #2F5BEA; font-family: 'Literata', serif; font-size: 1.15rem; min-width: 1rem; }
+
+/* upload box and question box */
+[data-testid="stFileUploaderDropzone"] { background: var(--paper) !important; border: 2px dashed var(--mocha) !important; border-radius: 14px !important; }
+[data-testid="stChatInput"], [data-testid="stChatInput"] > div { background: var(--paper) !important; border-color: var(--coffee) !important; border-radius: 14px !important; }
+
+/* buttons: coffee pills */
+.stButton > button, .stDownloadButton > button { background: var(--coffee) !important; color: var(--foam) !important;
+    border: none !important; border-radius: 999px !important; font-weight: 600; }
+.stButton > button *, .stDownloadButton > button * { color: inherit !important; }
+.stButton > button:hover, .stDownloadButton > button:hover { background: #2E1A10 !important; color: #FFFFFF !important; }
+.stButton > button:focus-visible, .stDownloadButton > button:focus-visible { outline: 3px solid var(--paper); outline-offset: 2px; }
+/* in the coffee sidebar the buttons flip to gold so they stay visible */
+[data-testid="stSidebar"] .stButton > button, [data-testid="stSidebar"] .stDownloadButton > button { background: var(--gold-deep) !important; }
+[data-testid="stSidebar"] .stButton > button, [data-testid="stSidebar"] .stButton > button *,
+[data-testid="stSidebar"] .stDownloadButton > button, [data-testid="stSidebar"] .stDownloadButton > button * { color: var(--coffee) !important; }
+
+/* "see the passages" box */
+[data-testid="stExpander"] details { background: #FFF5D6; border: 1px solid var(--latte) !important; border-radius: 10px; }
+
+/* the 1-2-3 steps on the start screen */
+.step { display: flex; gap: .9rem; align-items: center; margin: .7rem 0; color: var(--coffee); font-size: 1.05rem; }
+.step b { flex: none; width: 1.9rem; height: 1.9rem; border-radius: 999px; background: var(--coffee); color: var(--foam);
+          display: inline-flex; align-items: center; justify-content: center; font-family: 'Literata', serif; font-size: 1rem; }
+
+@media (max-width: 640px) { h1 { font-size: 2.3rem !important; } }
 </style>
 """, unsafe_allow_html=True)
 
