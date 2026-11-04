@@ -33,7 +33,8 @@ st.markdown("""
   --accent-soft: #EFF6FF;
 }
 
-html, body, .stApp, .stMarkdown, button, input, textarea { font-family: 'Inter', system-ui, -apple-system, sans-serif; }
+html, body, .stApp, .stApp p, .stApp div, .stApp label, .stApp button, .stApp input, .stApp textarea, .stApp a,
+.stApp span:not([data-testid="stIconMaterial"]) { font-family: 'Inter', system-ui, -apple-system, sans-serif; }
 .stApp { background: #FFFFFF; color: var(--ink); }
 [data-testid="stHeader"] { background: transparent; }
 [data-testid="stSidebar"], [data-testid="stSidebarCollapsedControl"] { display: none; }
@@ -45,6 +46,7 @@ html, body, .stApp, .stMarkdown, button, input, textarea { font-family: 'Inter',
 .crumb a { color: var(--muted); text-decoration: none; }
 .crumb a:hover { color: var(--accent); }
 .crumb strong { color: var(--ink); font-weight: 600; }
+.st-key-topbar [data-testid="stColumn"]:not(:first-child) [data-testid="stVerticalBlock"] { align-items: flex-end; }
 
 /* title: large, thin, centred */
 .title { font-weight: 300; font-size: 3.4rem; letter-spacing: -0.035em; line-height: 1.05; color: var(--ink); text-align: center; margin: 0; }
@@ -172,7 +174,7 @@ ss.setdefault("suggestions", [])
 
 # ---------- top bar ----------
 with st.container(key="topbar"):
-    crumb, gh, settings = st.columns([6, 1.5, 1.6], vertical_alignment="center")
+    crumb, gh, settings = st.columns([7, 1.3, 1.5], vertical_alignment="center")
     crumb.markdown(f'<p class="crumb"><a href="{LINKEDIN_URL}" target="_blank">arnav-shahi</a> / '
                    '<strong>ask-your-pdf</strong></p>', unsafe_allow_html=True)
     gh.link_button("GitHub", GITHUB_URL)
