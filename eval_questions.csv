@@ -1,24 +1,24 @@
 question,expected_page,file,type
-How does the AI RMF define risk?,9,NIST_AI_100-1.pdf,general
-Why might people trust an AI system more than they should?,9,NIST_AI_100-1.pdf,paraphrase
-By what year will NIST review the AI RMF with formal input from the AI community?,3,NIST_AI_100-1.pdf,keyword
-Which public law directs the goal of the AI RMF?,7,NIST_AI_100-1.pdf,keyword
-Why can AI risks measured in a lab differ from risks after deployment?,11,NIST_AI_100-1.pdf,paraphrase
-What is residual risk?,13,NIST_AI_100-1.pdf,keyword
-What should happen if an AI system poses unacceptable risks?,13,NIST_AI_100-1.pdf,paraphrase
-What are the four AI dimensions shown in Figure 2?,14,NIST_AI_100-1.pdf,general
-What are common security concerns for AI systems?,20,NIST_AI_100-1.pdf,general
-How is resilience different from security?,20,NIST_AI_100-1.pdf,paraphrase
-Which question does interpretability answer compared with explainability?,22,NIST_AI_100-1.pdf,paraphrase
-What are the three major categories of AI bias identified by NIST?,23,NIST_AI_100-1.pdf,general
-What does GOVERN 1.7 cover?,28,NIST_AI_100-1.pdf,keyword
-Which MEASURE subcategory covers the environmental impact of model training?,35,NIST_AI_100-1.pdf,keyword
-What response options can be used for high priority AI risks?,37,NIST_AI_100-1.pdf,general
-What does MANAGE 3.2 say about pre-trained models?,37,NIST_AI_100-1.pdf,keyword
-What is the difference between a current profile and a target profile?,38,NIST_AI_100-1.pdf,paraphrase
-What do AI deployment actors do?,40,NIST_AI_100-1.pdf,general
-How are AI risks different from traditional software risks?,43,NIST_AI_100-1.pdf,paraphrase
-Can humans working with AI end up making more biased decisions?,45,NIST_AI_100-1.pdf,paraphrase
+How does the AI RMF define risk?,9,NIST.AI.100-1.pdf,general
+Why might people trust an AI system more than they should?,9,NIST.AI.100-1.pdf,paraphrase
+By what year will NIST review the AI RMF with formal input from the AI community?,3,NIST.AI.100-1.pdf,keyword
+Which public law directs the goal of the AI RMF?,7,NIST.AI.100-1.pdf,keyword
+Why can AI risks measured in a lab differ from risks after deployment?,11,NIST.AI.100-1.pdf,paraphrase
+What is residual risk?,13,NIST.AI.100-1.pdf,keyword
+What should happen if an AI system poses unacceptable risks?,13,NIST.AI.100-1.pdf,paraphrase
+What are the four AI dimensions shown in Figure 2?,14,NIST.AI.100-1.pdf,general
+What are common security concerns for AI systems?,20,NIST.AI.100-1.pdf,general
+How is resilience different from security?,20,NIST.AI.100-1.pdf,paraphrase
+Which question does interpretability answer compared with explainability?,22,NIST.AI.100-1.pdf,paraphrase
+What are the three major categories of AI bias identified by NIST?,23,NIST.AI.100-1.pdf,general
+What does GOVERN 1.7 cover?,28,NIST.AI.100-1.pdf,keyword
+Which MEASURE subcategory covers the environmental impact of model training?,35,NIST.AI.100-1.pdf,keyword
+What response options can be used for high priority AI risks?,37,NIST.AI.100-1.pdf,general
+What does MANAGE 3.2 say about pre-trained models?,37,NIST.AI.100-1.pdf,keyword
+What is the difference between a current profile and a target profile?,38,NIST.AI.100-1.pdf,paraphrase
+What do AI deployment actors do?,40,NIST.AI.100-1.pdf,general
+How are AI risks different from traditional software risks?,43,NIST.AI.100-1.pdf,paraphrase
+Can humans working with AI end up making more biased decisions?,45,NIST.AI.100-1.pdf,paraphrase
 What growth rate has the economy achieved according to the speech?,6,budget_speech.pdf,paraphrase
 What is the outlay for Biopharma SHAKTI?,8,budget_speech.pdf,keyword
 How much money has TReDS made available to MSMEs?,11,budget_speech.pdf,keyword
