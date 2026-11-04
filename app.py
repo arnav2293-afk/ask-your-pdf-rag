@@ -1,4 +1,4 @@
-"""Streamlit front end for Ask Your PDF (v3: minimal single-column layout)."""
+"""Streamlit front end for Ask Your PDF (v4: Stripe-style light layout)."""
 import hashlib
 import html
 import io
@@ -19,28 +19,29 @@ LINKEDIN_URL = "https://www.linkedin.com/in/arnav-shahi-b7a787369"
 st.set_page_config(page_title="Ask Your PDF", page_icon="📄", layout="centered",
                    initial_sidebar_state="collapsed")
 
-# Look: monochrome page, thin grey borders, one blue accent used only for focus and page marks.
+# Look: linen page, white cards, warm hairline borders, royal blue used sparingly.
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap');
 
 :root {
-  --ink: #111827;
-  --muted: #6B7280;
-  --line: #E5E7EB;
-  --panel: #FAFAFA;
-  --accent: #2563EB;
+  --page: #FAF7F0;        /* linen page */
+  --card: #FFFFFF;        /* white cards that sit on top */
+  --ink: #1C1917;         /* warm near-black text */
+  --muted: #78716C;       /* warm grey secondary text */
+  --line: #E8E1D3;        /* warm hairline borders */
+  --accent: #2563EB;      /* royal blue, used sparingly */
   --accent-soft: #EFF6FF;
 }
 
 html, body, .stApp, .stApp p, .stApp div, .stApp label, .stApp button, .stApp input, .stApp textarea, .stApp a,
 .stApp span:not([data-testid="stIconMaterial"]) { font-family: 'Inter', system-ui, -apple-system, sans-serif; }
-.stApp { background: #FFFFFF; color: var(--ink); }
+.stApp { background: var(--page); color: var(--ink); }
 [data-testid="stHeader"] { background: transparent; }
 [data-testid="stSidebar"], [data-testid="stSidebarCollapsedControl"] { display: none; }
 .block-container, [data-testid="stMainBlockContainer"] { padding-top: 1.25rem !important; }
 
-/* top bar with a hairline border instead of a sidebar */
+/* top bar */
 .st-key-topbar { border-bottom: 1px solid var(--line); padding-bottom: .75rem; margin-bottom: 3rem; }
 .crumb { margin: 0; font-size: .95rem; color: var(--muted); }
 .crumb a { color: var(--muted); text-decoration: none; }
@@ -48,29 +49,41 @@ html, body, .stApp, .stApp p, .stApp div, .stApp label, .stApp button, .stApp in
 .crumb strong { color: var(--ink); font-weight: 600; }
 .st-key-topbar [data-testid="stColumn"]:not(:first-child) [data-testid="stVerticalBlock"] { align-items: flex-end; }
 
-/* title: large, thin, centred */
+/* title */
 .title { font-weight: 300; font-size: 3.4rem; letter-spacing: -0.035em; line-height: 1.05; color: var(--ink); text-align: center; margin: 0; }
 .subtitle { text-align: center; color: var(--muted); font-size: 1.08rem; margin: .8rem 0 2.4rem; }
 
-/* full-width upload panel */
-.st-key-upload [data-testid="stFileUploaderDropzone"] { background: var(--panel) !important; border: 1px dashed #D1D5DB !important; border-radius: 10px !important; }
-.st-key-upload [data-testid="stFileUploaderDropzone"]:hover { border-color: var(--accent) !important; }
+/* upload panel: white card on the slate page */
+.st-key-upload [data-testid="stFileUploaderDropzone"] { background: var(--card) !important; border: 1px dashed #D6CCB8 !important; border-radius: 12px !important; }
+.st-key-upload [data-testid="stFileUploaderDropzone"]:hover { border-color: var(--accent) !important; background: var(--accent-soft) !important; }
 .status { color: var(--muted); font-size: .9rem; margin: .55rem 0 0; }
 
-/* command bar: a clean search field, not a chat bubble */
+/* empty state card */
+.st-key-empty { background: var(--card); border-radius: 12px; margin-top: 1rem; }
+.empty { text-align: center; color: var(--muted); font-size: .98rem; margin: 1rem 0; }
+
+/* command bar */
 .st-key-command { margin: 1.4rem 0 .4rem; }
-.st-key-command [data-testid="stChatInput"] { background: #FFFFFF !important; border: 1px solid var(--line) !important; border-radius: 10px !important; box-shadow: 0 1px 2px rgba(17, 24, 39, .04); }
+.st-key-command [data-testid="stChatInput"] { background: var(--card) !important; border: 1px solid var(--line) !important; border-radius: 12px !important;
+    box-shadow: 0 1px 2px rgba(28, 25, 23, .05); }
 .st-key-command [data-testid="stChatInput"] > div { background: transparent !important; border: none !important; }
 .st-key-command [data-testid="stChatInput"]:focus-within { border-color: var(--accent) !important; box-shadow: 0 0 0 3px var(--accent-soft); }
 .st-key-command textarea { font-size: 1rem !important; }
 
-/* results */
+/* results: each answer is a white card */
 .q { font-size: 1.12rem; font-weight: 500; color: var(--ink); margin: 2rem 0 .6rem; }
+[class*="st-key-answer_"] { background: var(--card); border-radius: .75rem; }
 [data-testid="stMarkdownContainer"] p, [data-testid="stMarkdownContainer"] li { line-height: 1.7; }
 .cite { font-size: .74em; font-weight: 600; color: var(--accent); background: var(--accent-soft); border: 1px solid #BFDBFE;
         border-radius: 4px; padding: 0 .35em; margin-left: .2em; white-space: nowrap; cursor: help; }
-[data-testid="stExpander"] details { border: 1px solid var(--line) !important; border-radius: 8px; }
+[data-testid="stExpander"] details { background: var(--card); border: 1px solid var(--line) !important; border-radius: 8px; }
 .stButton > button { border-radius: 8px !important; }
+
+/* footer */
+.st-key-footer { border-top: 1px solid var(--line); margin-top: 4rem; padding-top: 1rem; }
+.st-key-footer [data-testid="stCaptionContainer"] { text-align: center; color: var(--muted); }
+.st-key-footer a { color: var(--muted) !important; }
+.st-key-footer a:hover { color: var(--accent) !important; }
 
 @media (max-width: 640px) { .title { font-size: 2.4rem; } .st-key-topbar { margin-bottom: 2rem; } }
 </style>
@@ -232,14 +245,15 @@ with st.container(key="upload"):
         st.markdown(f'<p class="status">Reading {html.escape(names)}: {pages} pages, '
                     f'{len(idx.chunks)} passages.</p>', unsafe_allow_html=True)
     else:
-        st.markdown('<p class="status">No document uploaded yet. Drag a PDF into the box above to begin.</p>',
-                    unsafe_allow_html=True)
+        with st.container(border=True, key="empty"):
+            st.markdown('<p class="empty">📂 Awaiting document... Drop a PDF above to activate search.</p>',
+                        unsafe_allow_html=True)
 
-# ---------- command bar ----------
-with st.container(key="command"):
-    typed = st.chat_input("Ask a question about this document..." if "index" in ss
-                          else "Upload a PDF above to start asking.",
-                          disabled="index" not in ss)
+# ---------- command bar: only shown once a PDF is indexed ----------
+typed = None
+if "index" in ss:
+    with st.container(key="command"):
+        typed = st.chat_input("Ask a question about this document...")
 question = typed or ss.pop("pending", None)
 
 if "index" in ss and not question:
@@ -258,9 +272,9 @@ if "index" in ss and not question:
 
 
 # ---------- results: newest answer sits right under the command bar ----------
-def render_turn(q, m):
+def render_turn(q, m, key):
     st.markdown(f'<p class="q">{html.escape(q)}</p>', unsafe_allow_html=True)
-    with st.container(border=True):
+    with st.container(border=True, key=key):
         st.markdown(render_answer(m["content"], m["sources"]), unsafe_allow_html=True)
         grounding_note(m)
         show_sources(m["sources"], m["cited"])
@@ -268,12 +282,16 @@ def render_turn(q, m):
 
 live = st.container()
 history = st.container()
+footer = st.container(key="footer")
+with footer:
+    st.caption(f"Built by [Arnav Shahi]({LINKEDIN_URL}) with FAISS, BM25, Groq and Gemini. "
+               f"[Source code on GitHub]({GITHUB_URL})")
 
 with history:
     msgs = ss.messages
     for i in range(len(msgs) - 2, -1, -2):
         if msgs[i]["role"] == "user" and msgs[i + 1]["role"] == "assistant":
-            render_turn(msgs[i]["content"], msgs[i + 1])
+            render_turn(msgs[i]["content"], msgs[i + 1], key=f"answer_{i}")
 
 if question and "index" in ss:
     # Earlier turns help with follow-ups like "explain that more simply"
@@ -288,7 +306,7 @@ if question and "index" in ss:
 
     with live:
         st.markdown(f'<p class="q">{html.escape(question)}</p>', unsafe_allow_html=True)
-        with st.container(border=True):
+        with st.container(border=True, key="answer_live"):
             box = st.empty()
             text = ""
             engine = {}
