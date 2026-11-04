@@ -9,15 +9,15 @@ from google.genai import types
 from pypdf import PdfReader
 from rank_bm25 import BM25Okapi
 
-EMBED_MODEL = "all-MiniLM-L6-v2"   # free, runs locally, 384-dim vectors
-LLM_MODEL = "gemini-3.8-flash"      # change here if Google renames the model
+EMBED_MODEL = "all-MiniLM-L6-v2"  # free, runs locally, 384-dim vectors
+LLM_MODEL = "gemini-3.8-flash"  # change here if Google renames the model
 FALLBACK_MODELS = ["gemini-flash-latest", "gemini-flash-lite-latest"]  # tried if the main one is busy
 GROQ_PREFERRED = ["llama-3.3-70b-versatile", "openai/gpt-oss-120b", "openai/gpt-oss-20b", "llama-3.1-8b-instant"]
-GEMINI_COOLDOWN = 300   # after Gemini fails completely, skip it for 5 minutes and go straight to Groq
+PROVIDER_COOLDOWN = 300  # after a provider fails, skip it for 5 minutes and try the other one first
 BUSY_ERRORS = ("429", "500", "503", "RESOURCE_EXHAUSTED", "UNAVAILABLE", "INTERNAL")
-CHUNK_SIZE = 900                    # characters per chunk
-CHUNK_OVERLAP = 150                 # characters shared between neighbor chunks
 
+CHUNK_SIZE = 900  # characters per chunk
+CHUNK_OVERLAP = 150  # characters shared between neighbor chunks
 NOT_FOUND = "I could not find that in the uploaded PDF."
 
 SYSTEM_RULES = f"""You answer questions using ONLY the numbered sources you are given.
@@ -30,8 +30,8 @@ Rules:
 @dataclass
 class Chunk:
     chunk_id: int
-    source: str   # file name
-    page: int     # 1-based page number
+    source: str  # file name
+    page: int  # 1-based page number
     text: str
 
 
@@ -72,7 +72,7 @@ class PDFIndex:
     def __init__(self, embedder):
         self.embedder = embedder
         self.chunks = []
-        self.files = []   # [{"name": ..., "pages": ...}]
+        self.files = []  # [{"name": ..., "pages": ...}]
         self.faiss_index = None
         self.bm25 = None
 
@@ -106,7 +106,6 @@ class PDFIndex:
     def search(self, query, k=5, pool=20, rrf_k=60, mode="hybrid"):
         """mode: "hybrid" (both), "dense" (FAISS only) or "bm25" (keywords only)."""
         pool = min(pool, len(self.chunks))
-
         q = self.embedder.encode([query], normalize_embeddings=True)
         _, idx = self.faiss_index.search(np.asarray(q, dtype="float32"), pool)
         dense_rank = [int(i) for i in idx[0] if i != -1]
@@ -137,14 +136,26 @@ def build_prompt(question, chunks, history=None):
     return prompt + f"\n\nQUESTION: {question}"
 
 
+def is_not_found(text):
+    """True when the model gave the fixed 'not in the PDF' reply."""
+    return NOT_FOUND.lower()[:25] in text.lower()
+
+
 def check_citations(text, n_sources):
-    """Find [S#] tags (also handles [S1, S3]) and flag any that point nowhere."""
+    """Find [S#] tags (also handles [S1, S3]), flag tags that point nowhere,
+    and flag any sentence that carries no tag at all.
+    Returns (valid, invalid, grounded); grounded means every sentence is cited."""
     tags = re.findall(r"\[(S[^\]]*)\]", text)
     cited = sorted({int(n) for t in tags for n in re.findall(r"S(\d+)", t)})
     valid = [n for n in cited if 1 <= n <= n_sources]
     invalid = [n for n in cited if n not in valid]
-    not_found = NOT_FOUND.lower()[:25] in text.lower()
-    grounded = not_found or (bool(valid) and not invalid)
+
+    # Split into sentences: after . ! ? (unless a tag follows right away) or after a closing tag.
+    # Very short pieces (3 words or fewer) are ignored, so stray fragments do not raise warnings.
+    parts = re.split(r"(?<=[.!?])\s+(?!\[S)|(?<=\])\s+", text.strip())
+    uncited = [s for s in parts if len(s.split()) > 3 and not re.search(r"\[S\d", s)]
+
+    grounded = is_not_found(text) or (bool(valid) and not invalid and not uncited)
     return valid, invalid, grounded
 
 
@@ -172,11 +183,11 @@ def _with_retry(call, budget=45):
                 msg = str(e)
                 print(f"[gemini] {model} attempt {attempt + 1} failed: {msg[:120]}")
                 if "404" in msg or "NOT_FOUND" in msg:
-                    break                      # model not available to us, try the next one
+                    break  # model not available to us, try the next one
                 if any(code in msg for code in BUSY_ERRORS) or "timed out" in msg.lower():
-                    time.sleep(2 * (attempt + 1))   # short back off: 2s, then 4s
+                    time.sleep(2 * (attempt + 1))  # short back off: 2s, then 4s
                     continue
-                raise                          # e.g. bad API key: no point retrying
+                raise  # e.g. bad API key: no point retrying
     raise last_error
 
 
@@ -184,22 +195,17 @@ def _config(temperature=0.2):
     return types.GenerateContentConfig(system_instruction=SYSTEM_RULES, temperature=temperature)
 
 
-# ---------- second provider: Groq (backup when Gemini is busy) ----------
-
-_gemini_down_until = 0.0     # "circuit breaker": time until which we skip Gemini
+# ---------- circuit breaker: works for both providers ----------
+_down_until = {"gemini": 0.0, "groq": 0.0}  # time until which each provider is skipped
 _groq_model_cache = None
 
 
-def _gemini_usable(client, groq):
-    return client is not None and (groq is None or time.time() >= _gemini_down_until)
+def _mark_down(provider, error):
+    _down_until[provider] = time.time() + PROVIDER_COOLDOWN
+    print(f"[{provider}] failed, trying it last for the next {PROVIDER_COOLDOWN // 60} min: {str(error)[:100]}")
 
 
-def _mark_gemini_down(error):
-    global _gemini_down_until
-    _gemini_down_until = time.time() + GEMINI_COOLDOWN
-    print(f"[gemini] failed, using Groq for the next {GEMINI_COOLDOWN // 60} min: {str(error)[:100]}")
-
-
+# ---------- second provider: Groq ----------
 def _groq_models(groq):
     """Ask Groq which models exist right now, so a retired model name never breaks the app."""
     global _groq_model_cache
@@ -234,22 +240,19 @@ def _groq_create(groq, system, prompt, temperature, stream, info=None):
 
 
 # ---------- answering: try providers in order until one works ----------
-
-PRIMARY_PROVIDER = "groq"    # "groq" or "gemini"; the other one is the backup
+PRIMARY_PROVIDER = "groq"  # "groq" or "gemini"; the other one is the backup
 
 
 def _provider_order(client, groq):
-    gem = client is not None
-    if PRIMARY_PROVIDER == "groq":
-        return [p for p, ok in (("groq", groq is not None), ("gemini", gem)) if ok]
-    order = []
-    if gem and _gemini_usable(client, groq):
-        order.append("gemini")
-    if groq is not None:
-        order.append("groq")
-    if gem and "gemini" not in order:
-        order.append("gemini")          # last resort even during cool down
-    return order
+    """Primary provider first, unless it failed recently. A provider that is
+    cooling down is not dropped, it just moves to the end as a last resort."""
+    order = [p for p, ok in (("groq", groq is not None), ("gemini", client is not None)) if ok]
+    if PRIMARY_PROVIDER == "gemini":
+        order.reverse()
+    now = time.time()
+    healthy = [p for p in order if now >= _down_until[p]]
+    resting = [p for p in order if now < _down_until[p]]
+    return healthy + resting
 
 
 def _complete(client, groq, system, prompt, temperature, stream=False, info=None):
@@ -261,38 +264,39 @@ def _complete(client, groq, system, prompt, temperature, stream=False, info=None
             if provider == "groq":
                 resp = _groq_create(groq, system, prompt, temperature, stream, info)
                 if stream:
-                    return (c.choices[0].delta.content for c in resp
-                            if c.choices and c.choices[0].delta.content)
-                return resp.choices[0].message.content or ""
-
-            cfg = types.GenerateContentConfig(system_instruction=system, temperature=temperature)
-            budget = 15 if groq is not None else 45
-            if stream:
-                def start(model):
-                    it = iter(client.models.generate_content_stream(model=model, contents=prompt, config=cfg))
-                    return next(it, None), it          # busy errors show up on the first piece
-                first, rest = _with_retry(start, budget=budget)
-
-                def pieces():
-                    if first is not None and first.text:
-                        yield first.text
-                    for part in rest:
-                        if part.text:
-                            yield part.text
-                result = pieces()
+                    result = (c.choices[0].delta.content for c in resp
+                              if c.choices and c.choices[0].delta.content)
+                else:
+                    result = resp.choices[0].message.content or ""
             else:
-                resp = _with_retry(lambda m: client.models.generate_content(
-                    model=m, contents=prompt, config=cfg), budget=budget)
-                result = resp.text or ""
-            if info is not None:
-                info["engine"] = "Gemini"
+                cfg = types.GenerateContentConfig(system_instruction=system, temperature=temperature)
+                budget = 15 if groq is not None else 45
+                if stream:
+                    def start(model):
+                        it = iter(client.models.generate_content_stream(model=model, contents=prompt, config=cfg))
+                        return next(it, None), it  # busy errors show up on the first piece
+
+                    first, rest = _with_retry(start, budget=budget)
+
+                    def pieces():
+                        if first is not None and first.text:
+                            yield first.text
+                        for part in rest:
+                            if part.text:
+                                yield part.text
+
+                    result = pieces()
+                else:
+                    resp = _with_retry(lambda m: client.models.generate_content(
+                        model=m, contents=prompt, config=cfg), budget=budget)
+                    result = resp.text or ""
+                if info is not None:
+                    info["engine"] = "Gemini"
+            _down_until[provider] = 0.0  # it answered, so it is healthy again
             return result
         except Exception as e:
             last_error = e
-            if provider == "gemini" and groq is not None:
-                _mark_gemini_down(e)
-            else:
-                print(f"[{provider}] failed: {str(e)[:120]}")
+            _mark_down(provider, e)
     raise last_error or RuntimeError("No AI provider is configured. Add an API key.")
 
 
