@@ -36,7 +36,6 @@ h1 { font-family: 'Literata', Georgia, serif !important; font-weight: 600 !impor
 
 
 # ---------- helpers ----------
-
 @st.cache_resource
 def load_embedder():
     return SentenceTransformer(EMBED_MODEL)
@@ -89,14 +88,15 @@ def grounding_note(msg):
 
 
 def friendly_error(e):
+    """Messages do not name one provider, because Groq or Gemini may have answered."""
     t = str(e)
-    if "429" in t or "RESOURCE_EXHAUSTED" in t:
-        return "Gemini's free limit was reached. Wait about a minute, then ask again."
+    if "429" in t or "RESOURCE_EXHAUSTED" in t or "rate limit" in t.lower():
+        return "The AI service hit its free usage limit. Wait about a minute, then ask again."
     if "503" in t or "UNAVAILABLE" in t or "took too long" in t or "timed out" in t.lower():
         return "The AI service is very busy right now and did not answer after several tries. Wait a minute, then ask again."
     if "API key" in t or "401" in t or "403" in t:
-        return "Gemini rejected the API key. Check GEMINI_API_KEY in your secrets."
-    return f"Gemini could not answer this time: {t}"
+        return "An API key was rejected. Check GEMINI_API_KEY and GROQ_API_KEY in your secrets."
+    return f"The AI service could not answer this time: {t}"
 
 
 def chat_markdown(messages):
@@ -111,7 +111,6 @@ def chat_markdown(messages):
 
 
 # ---------- setup ----------
-
 gemini_key = get_secret("GEMINI_API_KEY")
 groq_key = get_secret("GROQ_API_KEY")
 if not gemini_key and not groq_key:
@@ -178,7 +177,6 @@ with st.sidebar:
     st.caption("Built by Arnav Shahi with FAISS, BM25, Gemini and Groq.")
 
 # ---------- main area ----------
-
 if ss.get("index_error"):
     st.error(ss.index_error)
 
@@ -201,6 +199,7 @@ else:
                 ss.suggestions = suggest_questions(client, idx, groq=groq_client)
             except Exception:
                 ss.suggestions = []
+
     if not ss.messages and ss.suggestions:
         st.markdown("**Try asking**")
         for i, q in enumerate(ss.suggestions):
@@ -239,9 +238,9 @@ if question and "index" in ss:
     with st.chat_message("assistant"):
         box = st.empty()
         text = ""
+        engine = {}
         try:
             with st.spinner("Finding the right pages..."):
-                engine = {}
                 stream = stream_answer(client, question, chunks, pairs, groq=groq_client, info=engine)
                 first = next(stream, "")
             text = first
@@ -258,10 +257,9 @@ if question and "index" in ss:
         text = text.strip()
         valid, invalid, grounded = check_citations(text, len(chunks))
         msg = {"role": "assistant", "content": text, "sources": sources, "cited": valid,
-               "grounded": grounded, "not_found": "could not find" in text.lower(),
+               "grounded": grounded, "not_found": rag.is_not_found(text),
                "engine": engine.get("engine", "")}
         box.markdown(render_answer(text, sources), unsafe_allow_html=True)
         grounding_note(msg)
         show_sources(sources, valid)
-
     ss.messages.append(msg)

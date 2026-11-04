@@ -10,8 +10,8 @@ Upload one or more PDFs, ask questions in plain English, and get short answers w
 
 - **Page-level citations:** every sentence is tagged with its source and shown as a highlighted page mark (hover to see the file name)
 - **Hybrid search:** FAISS vector search (meaning) + BM25 keyword search (exact words), merged with Reciprocal Rank Fusion
-- **Citation check:** code verifies every citation points to a real retrieved passage and warns when a sentence is unsupported
-- **Multi-provider LLM with failover:** Groq (open models such as gpt-oss and Llama) first, Google Gemini as backup, with retries, timeouts and a circuit breaker
+- **Citation check:** code checks every sentence of the answer, confirms each tag points to a real retrieved passage, and warns when any sentence has no page reference
+- **Multi-provider LLM with failover:** Groq (open models such as gpt-oss and Llama) first, Google Gemini as backup, with retries, timeouts and a circuit breaker on both providers
 - **Follow-up questions:** remembers the last two turns, so "explain that more simply" works
 - **Streaming answers, suggested starter questions, chat download, auto indexing on upload**
 
@@ -26,8 +26,10 @@ PDF -> pypdf (text per page) -> chunks of ~900 chars, 150 overlap
 Answering (every question)
 question -> FAISS top 20 + BM25 top 20 -> RRF merge -> best 5 passages
          -> LLM with strict rules (sources only, tag every sentence [S1], say "not found")
-         -> citation check -> answer with page marks
+         -> per-sentence citation check -> answer with page marks
 ```
+
+Chunks never cross a page boundary, so every citation points to one exact page.
 
 ## Tech stack
 
@@ -41,17 +43,17 @@ Python, Streamlit, pypdf, sentence-transformers (all-MiniLM-L6-v2), FAISS, rank-
 | Google retired the Gemini model I used (HTTP 404) | Model name lives in one config line, so the fix was one line |
 | A slow API call froze the whole UI | Per-request timeouts and loading extras after the main content |
 | Gemini overloaded (HTTP 503) | Retries with back off, fallback models, then a second provider (Groq) |
-| Every question waited on a failing provider | Circuit breaker: skip a failed provider for 5 minutes |
+| Every question waited on a failing provider | Circuit breaker on both Groq and Gemini: a failed provider moves to the back of the line for 5 minutes |
 | A provider can retire models anytime | The app reads Groq's live model list and picks an available one |
+| The ✓ "fully cited" badge showed even when only one sentence had a tag | Citation check now looks at every sentence, not just whether any tag exists |
 
 ## Evaluation
 
-`eval.py` scores retrieval on a hand-written question set (`eval_questions.csv`), where each question is paired with the page that holds the answer.
+`eval.py` scores retrieval on a hand-written question set (`eval_questions.csv`), where each question is paired with the page that holds the answer. One run compares all three retrieval modes and prints a table ready to paste here.
 
-```bash
-python eval.py --mode dense    # FAISS only
-python eval.py --mode bm25     # keywords only
-python eval.py --mode hybrid   # both, merged with RRF
+```
+python eval.py              # dense vs BM25 vs hybrid, hit rate @ 5 and MRR
+python eval.py --with-llm   # also: share of answers where every sentence is cited
 ```
 
 | Metric | Dense only | BM25 only | Hybrid |
@@ -59,9 +61,11 @@ python eval.py --mode hybrid   # both, merged with RRF
 | Hit rate @ 5 | [fill in] | [fill in] | [fill in] |
 | MRR | [fill in] | [fill in] | [fill in] |
 
+Question set: 42 hand-written questions across 2 PDFs in `sample_pdfs` (NIST AI Risk Management Framework, 48 pages, and the Union Budget 2026-27 speech, 65 pages), tagged as keyword (21), paraphrase (15) or general (6). Every expected page was checked against the text pypdf extracts, and each answer appears on exactly one page. Page numbers are PDF page positions, not the printed page numbers.
+
 ## Run it locally
 
-```bash
+```
 git clone https://github.com/arnav2293-afk/ask-your-pdf-rag.git
 cd ask-your-pdf-rag
 python3 -m venv venv
@@ -77,9 +81,9 @@ Free keys: Groq at https://console.groq.com and Gemini at https://aistudio.googl
 
 - Scanned PDFs need OCR first (the app shows a message when no text is found)
 - Tables are read as plain text, so complex tables lose structure
-- Next: cross-encoder reranker, persistent vector database (ChromaDB), multilingual embeddings for Hindi PDFs
+- The BM25 tokenizer keeps only English letters and digits, so Hindi PDFs need a new tokenizer as well as multilingual embeddings
+- Next: cross-encoder reranker, persistent vector database (ChromaDB), Hindi support
 
 ## Author
 
-**Arnav Shahi**, B.Tech AIML (2nd year)
-[GitHub](https://github.com/arnav2293-afk) | [LinkedIn](https://www.linkedin.com/in/arnav-shahi-b7a787369)
+**Arnav Shahi**, B.Tech AIML (2nd year) [GitHub](https://github.com/arnav2293-afk) | [LinkedIn](https://www.linkedin.com/in/arnav-shahi-b7a787369)
