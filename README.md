@@ -64,6 +64,7 @@ python eval.py --with-llm   # also: share of answers where every sentence is cit
 Question set: 42 hand-written questions across 2 PDFs in `sample_pdfs` (NIST AI Risk Management Framework, 48 pages, and the Union Budget 2026-27 speech, 65 pages), tagged as keyword (21), paraphrase (15) or general (6). Every expected page was checked against the text pypdf extracts, and each answer appears on exactly one page. Page numbers are PDF page positions, not the printed page numbers.
 
 Hybrid found the right page in the top 5 for all 42 questions, against 95.2% for dense search alone and 97.6% for BM25 alone, and ranked it highest on average (MRR 0.882 vs 0.781 for dense). Merging both with RRF beats either one.
+Tried and rejected: joining words split by line-end hyphens in the PDF text (239 fixes in the NIST PDF). It shifted chunk boundaries and lowered hybrid hit rate from 100% to 97.6% with no real BM25 gain (MRR 0.858 to 0.862), so it was reverted.
 
 ## Run it locally
 
