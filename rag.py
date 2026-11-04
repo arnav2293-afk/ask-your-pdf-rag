@@ -40,7 +40,9 @@ def extract_pages(file):
     reader = PdfReader(file)
     pages = []
     for i, page in enumerate(reader.pages, start=1):
-        text = re.sub(r"\s+", " ", page.extract_text() or "").strip()
+                 raw = page.extract_text() or ""
+           raw = re.sub(r"(\w)-\s*\n\s*(\w)", r"\1\2", raw)  # join words split across lines: "decom-\nmissioning"
+           text = re.sub(r"\s+", " ", raw).strip()
         if text:
             pages.append((i, text))
     return pages, len(reader.pages)
