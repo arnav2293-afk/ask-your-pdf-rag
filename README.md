@@ -1,63 +1,85 @@
-# 📄 Ask Your PDF: RAG Document Chatbot
+# 📄 Ask Your PDF: RAG Chatbot with Page Citations
 
-Upload one or more PDFs, ask questions in plain English, and get short answers that cite the exact file and page they came from. If the answer is not in the PDF, the bot says so instead of guessing.
+Upload one or more PDFs, ask questions in plain English, and get short answers where every sentence shows the page it came from. If the answer is not in the PDF, the app says so instead of guessing.
 
-**Live demo:** [add your Streamlit link here]
+**🔗 Live demo:** https://ask-your-pdf-arnav.streamlit.app
+
+![Ask Your PDF demo](demo.png)
+
+## Features
+
+- **Page-level citations:** every sentence is tagged with its source and shown as a highlighted page mark (hover to see the file name)
+- **Hybrid search:** FAISS vector search (meaning) + BM25 keyword search (exact words), merged with Reciprocal Rank Fusion
+- **Citation check:** code verifies every citation points to a real retrieved passage and warns when a sentence is unsupported
+- **Multi-provider LLM with failover:** Groq (open models such as gpt-oss and Llama) first, Google Gemini as backup, with retries, timeouts and a circuit breaker
+- **Follow-up questions:** remembers the last two turns, so "explain that more simply" works
+- **Streaming answers, suggested starter questions, chat download, auto indexing on upload**
 
 ## How it works
 
-1. **Parse:** `pypdf` reads each page and keeps the page number.
-2. **Chunk:** each page is split into ~900 character chunks with 150 characters of overlap, ending on full sentences where possible.
-3. **Index (hybrid):**
-   - `sentence-transformers` (all-MiniLM-L6-v2) turns chunks into vectors stored in a **FAISS** index, which finds passages by meaning.
-   - **BM25** finds passages by exact keywords (names, numbers, codes).
-   - **Reciprocal Rank Fusion** merges both rankings.
-4. **Answer:** the top passages go to **Gemini** with strict rules: use only these sources, tag every sentence with [S#], or reply "not found".
-5. **Citation check:** the app verifies every [S#] tag points to a real retrieved passage and warns the user when an answer is uncited.
+```
+Indexing (once per upload)
+PDF -> pypdf (text per page) -> chunks of ~900 chars, 150 overlap
+    -> sentence-transformers embeddings (384 dims) -> FAISS index
+    -> tokens -> BM25 index
+
+Answering (every question)
+question -> FAISS top 20 + BM25 top 20 -> RRF merge -> best 5 passages
+         -> LLM with strict rules (sources only, tag every sentence [S1], say "not found")
+         -> citation check -> answer with page marks
+```
 
 ## Tech stack
 
-Python, Streamlit, pypdf, sentence-transformers, FAISS, rank-bm25, Google Gemini API, pandas
+Python, Streamlit, pypdf, sentence-transformers (all-MiniLM-L6-v2), FAISS, rank-bm25, Groq API (gpt-oss, Llama), Google Gemini API, pandas
+
+## Engineering challenges I solved
+
+| Problem in production | Fix |
+|---|---|
+| Deploy took ages: pip pulled the 2 GB GPU build of PyTorch | Pinned the CPU-only PyTorch index in requirements.txt |
+| Google retired the Gemini model I used (HTTP 404) | Model name lives in one config line, so the fix was one line |
+| A slow API call froze the whole UI | Per-request timeouts and loading extras after the main content |
+| Gemini overloaded (HTTP 503) | Retries with back off, fallback models, then a second provider (Groq) |
+| Every question waited on a failing provider | Circuit breaker: skip a failed provider for 5 minutes |
+| A provider can retire models anytime | The app reads Groq's live model list and picks an available one |
+
+## Evaluation
+
+`eval.py` scores retrieval on a hand-written question set (`eval_questions.csv`), where each question is paired with the page that holds the answer.
+
+```bash
+python eval.py --mode dense    # FAISS only
+python eval.py --mode bm25     # keywords only
+python eval.py --mode hybrid   # both, merged with RRF
+```
+
+| Metric | Dense only | BM25 only | Hybrid |
+|---|---|---|---|
+| Hit rate @ 5 | [fill in] | [fill in] | [fill in] |
+| MRR | [fill in] | [fill in] | [fill in] |
 
 ## Run it locally
 
 ```bash
 git clone https://github.com/arnav2293-afk/ask-your-pdf-rag.git
 cd ask-your-pdf-rag
-python -m venv venv
-# Windows: venv\Scripts\activate    Mac: source venv/bin/activate
+python3 -m venv venv
+source venv/bin/activate          # Windows: venv\Scripts\activate
 pip install -r requirements.txt
-cp .streamlit/secrets.toml.example .streamlit/secrets.toml   # then paste your Gemini key
+cp .streamlit/secrets.toml.example .streamlit/secrets.toml   # add your keys
 streamlit run app.py
 ```
 
-Get a free Gemini API key at https://aistudio.google.com
+Free keys: Groq at https://console.groq.com and Gemini at https://aistudio.google.com. One key is enough; with both, each is the other's backup.
 
-## Evaluation
+## Limitations and next steps
 
-`eval.py` scores retrieval against a hand-written question set (`eval_questions.csv`, each question paired with the page that holds the answer).
-
-```bash
-python eval.py              # retrieval metrics only
-python eval.py --with-llm   # also checks citation coverage
-python eval.py --mode dense # FAISS only (compare against hybrid)
-python eval.py --mode bm25  # keywords only
-```
-
-| Metric | Dense only | BM25 only | Hybrid |
-|---|---|---|---|
-| Test PDFs | [fill in] | | |
-| Questions | [fill in] | | |
-| Hit rate @ 5 | [fill in] | [fill in] | [fill in] |
-| MRR | [fill in] | [fill in] | [fill in] |
-| Fully cited answers | | | [fill in] |
-
-## Limitations
-
-- Scanned PDFs (images of text) need OCR first; the app shows a message when no text is found.
-- Tables are read as plain text, so complex tables may lose structure.
-- The index lives in memory and resets when the app restarts.
+- Scanned PDFs need OCR first (the app shows a message when no text is found)
+- Tables are read as plain text, so complex tables lose structure
+- Next: cross-encoder reranker, persistent vector database (ChromaDB), multilingual embeddings for Hindi PDFs
 
 ## Author
 
-Arnav Shahi | [GitHub](https://github.com/arnav2293-afk) | [LinkedIn](https://www.linkedin.com/in/arnav-shahi-b7a787369) | B.Tech AIML, 2nd year
+**Arnav Shahi**, B.Tech AIML (2nd year)
+[GitHub](https://github.com/arnav2293-afk) | [LinkedIn](https://www.linkedin.com/in/arnav-shahi-b7a787369)
