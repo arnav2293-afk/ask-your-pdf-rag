@@ -12,6 +12,8 @@ from rank_bm25 import BM25Okapi
 EMBED_MODEL = "all-MiniLM-L6-v2"   # free, runs locally, 384-dim vectors
 LLM_MODEL = "gemini-3.8-flash"      # change here if Google renames the model
 FALLBACK_MODELS = ["gemini-flash-latest", "gemini-flash-lite-latest"]  # tried if the main one is busy
+GROQ_PREFERRED = ["llama-3.3-70b-versatile", "openai/gpt-oss-120b", "openai/gpt-oss-20b", "llama-3.1-8b-instant"]
+GEMINI_COOLDOWN = 300   # after Gemini fails completely, skip it for 5 minutes and go straight to Groq
 BUSY_ERRORS = ("429", "500", "503", "RESOURCE_EXHAUSTED", "UNAVAILABLE", "INTERNAL")
 CHUNK_SIZE = 900                    # characters per chunk
 CHUNK_OVERLAP = 150                 # characters shared between neighbor chunks
@@ -182,36 +184,136 @@ def _config(temperature=0.2):
     return types.GenerateContentConfig(system_instruction=SYSTEM_RULES, temperature=temperature)
 
 
-def answer(client, question, chunks, history=None):
-    resp = _with_retry(lambda m: client.models.generate_content(
-        model=m, contents=build_prompt(question, chunks, history), config=_config()))
-    text = (resp.text or "").strip()
+# ---------- second provider: Groq (backup when Gemini is busy) ----------
+
+_gemini_down_until = 0.0     # "circuit breaker": time until which we skip Gemini
+_groq_model_cache = None
+
+
+def _gemini_usable(client, groq):
+    return client is not None and (groq is None or time.time() >= _gemini_down_until)
+
+
+def _mark_gemini_down(error):
+    global _gemini_down_until
+    _gemini_down_until = time.time() + GEMINI_COOLDOWN
+    print(f"[gemini] failed, using Groq for the next {GEMINI_COOLDOWN // 60} min: {str(error)[:100]}")
+
+
+def _groq_models(groq):
+    """Ask Groq which models exist right now, so a retired model name never breaks the app."""
+    global _groq_model_cache
+    if _groq_model_cache is None:
+        try:
+            ids = [m.id for m in groq.models.list().data]
+        except Exception as e:
+            print(f"[groq] could not list models: {str(e)[:100]}")
+            ids = []
+        skip = ("whisper", "guard", "tts", "embed", "vision", "audio", "speech")
+        chat = [i for i in ids if not any(w in i.lower() for w in skip)]
+        ordered = [m for m in GROQ_PREFERRED if m in chat] + [m for m in chat if m not in GROQ_PREFERRED]
+        _groq_model_cache = ordered or GROQ_PREFERRED
+    return _groq_model_cache[:3]
+
+
+def _groq_create(groq, system, prompt, temperature, stream, info=None):
+    last_error = None
+    for model in _groq_models(groq):
+        try:
+            resp = groq.chat.completions.create(
+                model=model, temperature=temperature, stream=stream,
+                messages=[{"role": "system", "content": system}, {"role": "user", "content": prompt}])
+            print(f"[groq] {model} answered")
+            if info is not None:
+                info["engine"] = f"Groq ({model})"
+            return resp
+        except Exception as e:
+            last_error = e
+            print(f"[groq] {model} failed: {str(e)[:120]}")
+    raise last_error
+
+
+# ---------- answering: try providers in order until one works ----------
+
+PRIMARY_PROVIDER = "groq"    # "groq" or "gemini"; the other one is the backup
+
+
+def _provider_order(client, groq):
+    gem = client is not None
+    if PRIMARY_PROVIDER == "groq":
+        return [p for p, ok in (("groq", groq is not None), ("gemini", gem)) if ok]
+    order = []
+    if gem and _gemini_usable(client, groq):
+        order.append("gemini")
+    if groq is not None:
+        order.append("groq")
+    if gem and "gemini" not in order:
+        order.append("gemini")          # last resort even during cool down
+    return order
+
+
+def _complete(client, groq, system, prompt, temperature, stream=False, info=None):
+    """Return text (or a generator of text pieces when stream=True) from the
+    first provider that works. Failures are logged and the next one is tried."""
+    last_error = None
+    for provider in _provider_order(client, groq):
+        try:
+            if provider == "groq":
+                resp = _groq_create(groq, system, prompt, temperature, stream, info)
+                if stream:
+                    return (c.choices[0].delta.content for c in resp
+                            if c.choices and c.choices[0].delta.content)
+                return resp.choices[0].message.content or ""
+
+            cfg = types.GenerateContentConfig(system_instruction=system, temperature=temperature)
+            budget = 15 if groq is not None else 45
+            if stream:
+                def start(model):
+                    it = iter(client.models.generate_content_stream(model=model, contents=prompt, config=cfg))
+                    return next(it, None), it          # busy errors show up on the first piece
+                first, rest = _with_retry(start, budget=budget)
+
+                def pieces():
+                    if first is not None and first.text:
+                        yield first.text
+                    for part in rest:
+                        if part.text:
+                            yield part.text
+                result = pieces()
+            else:
+                resp = _with_retry(lambda m: client.models.generate_content(
+                    model=m, contents=prompt, config=cfg), budget=budget)
+                result = resp.text or ""
+            if info is not None:
+                info["engine"] = "Gemini"
+            return result
+        except Exception as e:
+            last_error = e
+            if provider == "gemini" and groq is not None:
+                _mark_gemini_down(e)
+            else:
+                print(f"[{provider}] failed: {str(e)[:120]}")
+    raise last_error or RuntimeError("No AI provider is configured. Add an API key.")
+
+
+def answer(client, question, chunks, history=None, groq=None, info=None):
+    text = _complete(client, groq, SYSTEM_RULES, build_prompt(question, chunks, history), 0.2, info=info).strip()
     valid, invalid, grounded = check_citations(text, len(chunks))
     return {"answer": text, "cited": valid, "invalid": invalid, "grounded": grounded}
 
 
-def stream_answer(client, question, chunks, history=None):
+def stream_answer(client, question, chunks, history=None, groq=None, info=None):
     """Yield the answer piece by piece so the user sees it being written."""
-    def start(model):
-        it = iter(client.models.generate_content_stream(
-            model=model, contents=build_prompt(question, chunks, history), config=_config()))
-        return next(it, None), it              # busy errors show up on the first piece
-
-    first, rest = _with_retry(start)
-    if first is not None and first.text:
-        yield first.text
-    for part in rest:
-        if part.text:
-            yield part.text
+    yield from _complete(client, groq, SYSTEM_RULES, build_prompt(question, chunks, history),
+                         0.2, stream=True, info=info)
 
 
-def suggest_questions(client, index, n=3):
-    """Ask Gemini for a few starter questions based on the first pages."""
+def suggest_questions(client, index, n=3, groq=None):
+    """Ask the LLM for a few starter questions based on the first pages."""
     sample = " ".join(c.text for c in index.chunks[:8])[:5000]
     prompt = (f"Here is the start of a document:\n\n{sample}\n\n"
               f"Write {n} short questions (under 12 words each) that this text clearly answers. "
               "One per line, no numbering, no extra text.")
-    resp = _with_retry(lambda m: client.models.generate_content(
-        model=m, contents=prompt, config=types.GenerateContentConfig(temperature=0.4)))
-    lines = [re.sub(r"^[\s\-\*\d\.\)]+", "", line).strip() for line in (resp.text or "").splitlines()]
+    text = _complete(client, groq, "You write short questions about documents.", prompt, 0.4)
+    lines = [re.sub(r"^[\s\-\*\d\.\)]+", "", line).strip() for line in text.splitlines()]
     return [line for line in lines if line.endswith("?")][:n]

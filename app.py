@@ -10,6 +10,7 @@ from google import genai
 from google.genai import types
 from sentence_transformers import SentenceTransformer
 
+import rag
 from rag import EMBED_MODEL, PDFIndex, check_citations, stream_answer, suggest_questions
 
 st.set_page_config(page_title="Ask Your PDF", page_icon="📄", layout="centered")
@@ -41,11 +42,11 @@ def load_embedder():
     return SentenceTransformer(EMBED_MODEL)
 
 
-def get_api_key():
+def get_secret(name):
     try:
-        return st.secrets["GEMINI_API_KEY"]
+        return st.secrets[name]
     except Exception:
-        return os.getenv("GEMINI_API_KEY", "")
+        return os.getenv(name, "")
 
 
 def render_answer(text, sources):
@@ -77,6 +78,8 @@ def show_sources(sources, cited):
 
 
 def grounding_note(msg):
+    if msg.get("engine"):
+        st.caption(f"Answered by {msg['engine']}")
     if msg.get("not_found"):
         return
     if msg["grounded"]:
@@ -90,7 +93,7 @@ def friendly_error(e):
     if "429" in t or "RESOURCE_EXHAUSTED" in t:
         return "Gemini's free limit was reached. Wait about a minute, then ask again."
     if "503" in t or "UNAVAILABLE" in t or "took too long" in t or "timed out" in t.lower():
-        return "Gemini is very busy right now and did not answer after several tries. Wait a minute, then ask again."
+        return "The AI service is very busy right now and did not answer after several tries. Wait a minute, then ask again."
     if "API key" in t or "401" in t or "403" in t:
         return "Gemini rejected the API key. Check GEMINI_API_KEY in your secrets."
     return f"Gemini could not answer this time: {t}"
@@ -109,11 +112,19 @@ def chat_markdown(messages):
 
 # ---------- setup ----------
 
-api_key = get_api_key()
-if not api_key:
-    st.error("Missing GEMINI_API_KEY. Add it to .streamlit/secrets.toml (see README).")
+gemini_key = get_secret("GEMINI_API_KEY")
+groq_key = get_secret("GROQ_API_KEY")
+if not gemini_key and not groq_key:
+    st.error("Missing API keys. Add GEMINI_API_KEY and/or GROQ_API_KEY to .streamlit/secrets.toml (see README).")
     st.stop()
-client = genai.Client(api_key=api_key, http_options=types.HttpOptions(timeout=25000))  # one request gives up after 25 s
+
+# Each request gives up after 20 s so one slow service can never freeze the app
+client = genai.Client(api_key=gemini_key, http_options=types.HttpOptions(timeout=20000)) if gemini_key else None
+rag.PRIMARY_PROVIDER = (get_secret("PRIMARY_PROVIDER") or "groq").lower()  # which AI to try first
+groq_client = None
+if groq_key:
+    from groq import Groq
+    groq_client = Groq(api_key=groq_key, timeout=20.0, max_retries=1)
 
 ss = st.session_state
 ss.setdefault("messages", [])
@@ -160,7 +171,11 @@ with st.sidebar:
         if st.button("Start a new chat", use_container_width=True):
             ss.messages = []
             st.rerun()
-    st.caption("Built by Arnav Shahi with FAISS, BM25 and Gemini.")
+    engines = [n for n, ok in (("Groq", groq_client), ("Gemini", client)) if ok]
+    if rag.PRIMARY_PROVIDER == "gemini":
+        engines.reverse()
+    st.caption("AI order: " + " then ".join(engines))
+    st.caption("Built by Arnav Shahi with FAISS, BM25, Gemini and Groq.")
 
 # ---------- main area ----------
 
@@ -183,7 +198,7 @@ else:
     if ss.pop("need_suggestions", False):
         with st.spinner("Thinking of questions you could ask..."):
             try:
-                ss.suggestions = suggest_questions(client, idx)
+                ss.suggestions = suggest_questions(client, idx, groq=groq_client)
             except Exception:
                 ss.suggestions = []
     if not ss.messages and ss.suggestions:
@@ -226,7 +241,8 @@ if question and "index" in ss:
         text = ""
         try:
             with st.spinner("Finding the right pages..."):
-                stream = stream_answer(client, question, chunks, pairs)
+                engine = {}
+                stream = stream_answer(client, question, chunks, pairs, groq=groq_client, info=engine)
                 first = next(stream, "")
             text = first
             box.markdown(render_answer(text, sources) + " ▍", unsafe_allow_html=True)
@@ -242,7 +258,8 @@ if question and "index" in ss:
         text = text.strip()
         valid, invalid, grounded = check_citations(text, len(chunks))
         msg = {"role": "assistant", "content": text, "sources": sources, "cited": valid,
-               "grounded": grounded, "not_found": "could not find" in text.lower()}
+               "grounded": grounded, "not_found": "could not find" in text.lower(),
+               "engine": engine.get("engine", "")}
         box.markdown(render_answer(text, sources), unsafe_allow_html=True)
         grounding_note(msg)
         show_sources(sources, valid)
