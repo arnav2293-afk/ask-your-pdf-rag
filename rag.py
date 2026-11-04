@@ -150,21 +150,29 @@ def _models():
     return [LLM_MODEL] + [m for m in FALLBACK_MODELS if m != LLM_MODEL]
 
 
-def _with_retry(call):
-    """Run call(model_name). If Gemini is busy, wait and retry (1s, 2s, 4s),
-    then move to the next model. Other errors are raised straight away."""
-    last_error = None
+def _with_retry(call, budget=45):
+    """Run call(model_name). If Gemini is busy, wait and retry, then move to the
+    next model. Stops after `budget` seconds so the user is never left waiting long.
+    Messages are printed so they show up in the Streamlit Cloud logs."""
+    last_error, start = None, time.time()
     for model in _models():
-        for attempt in range(3):
+        for attempt in range(2):
+            if time.time() - start > budget:
+                print(f"[gemini] gave up after {budget}s")
+                raise last_error or TimeoutError("Gemini took too long")
             try:
-                return call(model)
+                t0 = time.time()
+                result = call(model)
+                print(f"[gemini] {model} answered in {time.time() - t0:.1f}s")
+                return result
             except Exception as e:
                 last_error = e
                 msg = str(e)
+                print(f"[gemini] {model} attempt {attempt + 1} failed: {msg[:120]}")
                 if "404" in msg or "NOT_FOUND" in msg:
                     break                      # model not available to us, try the next one
-                if any(code in msg for code in BUSY_ERRORS):
-                    time.sleep(2 ** attempt)   # back off before retrying
+                if any(code in msg for code in BUSY_ERRORS) or "timed out" in msg.lower():
+                    time.sleep(2 * (attempt + 1))   # short back off: 2s, then 4s
                     continue
                 raise                          # e.g. bad API key: no point retrying
     raise last_error

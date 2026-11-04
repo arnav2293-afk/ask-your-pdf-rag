@@ -89,7 +89,7 @@ def friendly_error(e):
     t = str(e)
     if "429" in t or "RESOURCE_EXHAUSTED" in t:
         return "Gemini's free limit was reached. Wait about a minute, then ask again."
-    if "503" in t or "UNAVAILABLE" in t:
+    if "503" in t or "UNAVAILABLE" in t or "took too long" in t or "timed out" in t.lower():
         return "Gemini is very busy right now and did not answer after several tries. Wait a minute, then ask again."
     if "API key" in t or "401" in t or "403" in t:
         return "Gemini rejected the API key. Check GEMINI_API_KEY in your secrets."
@@ -113,7 +113,7 @@ api_key = get_api_key()
 if not api_key:
     st.error("Missing GEMINI_API_KEY. Add it to .streamlit/secrets.toml (see README).")
     st.stop()
-client = genai.Client(api_key=api_key, http_options=types.HttpOptions(timeout=60000))  # give up after 60 s
+client = genai.Client(api_key=api_key, http_options=types.HttpOptions(timeout=25000))  # one request gives up after 25 s
 
 ss = st.session_state
 ss.setdefault("messages", [])
